@@ -1,8 +1,10 @@
 import enum
+import logging
+import time
 import requests
 from requests.exceptions import Timeout
 
-from exporter import health
+from exporter import health_cost, health_counter
 from dataclasses import dataclass
 
 TIMEOUT = 3
@@ -19,6 +21,7 @@ class TestRequest:
 class TestResponse:
     status_code: int
     time_cost: float
+    proxy: str
 
 
 class ResponseCode(enum.Enum):
@@ -26,16 +29,22 @@ class ResponseCode(enum.Enum):
     UNKNOWN = -10
 
 
-@health
+@health_cost
+@health_counter
 def test_proxy_get(
     url: str, http_proxy: str = "", https_proxy: str = ""
 ) -> TestResponse:
+    time_cost = 0
     try:
         proxy = {"http": http_proxy, "https": https_proxy}
         headers = {"Connection": "close"}
         r = requests.get(url, proxies=proxy, timeout=TIMEOUT, headers=headers)
-        return TestResponse(r.status_code, r.elapsed.total_seconds())
+        code = r.status_code
+        time_cost = r.elapsed.total_seconds()
     except Timeout:
-        return TestResponse(ResponseCode.TIMEOUT.value, TIMEOUT)
+        code = ResponseCode.TIMEOUT.value
     except Exception:
-        return TestResponse(ResponseCode.UNKNOWN.value, 0)
+        code = ResponseCode.UNKNOWN.value
+
+    logging.info(f"{code},{time_cost*1000:.0f}ms,{url},{http_proxy or https_proxy}")
+    return TestResponse(code, time_cost, http_proxy or https_proxy or "")

@@ -1,30 +1,39 @@
-import logging
-
 from collections import namedtuple
-from prometheus_client import Histogram
+import time
+from prometheus_client import Counter, Summary
 
 
 Label = namedtuple("Label", ["target", "proxy", "status_code"])
 LABEL_NAMES = [x for x in Label._fields]
 
 
-h = Histogram("request_latency_seconds", "Request latency in seconds", LABEL_NAMES)
+s = Summary("request_latency_seconds", "Request latency in seconds", LABEL_NAMES)
+c = Counter("request_count", "Request count", LABEL_NAMES)
 
 
-def health(func):
-    def wrapper(*args, **kwargs):
-        url = args[0]
-        http_proxy = kwargs.get("http_proxy")
-        https_proxy = kwargs.get("https_proxy")
+def health_counter(func):
+    def wrapper(url: str, http_proxy: str = "", https_proxy: str = ""):
+        resp = func(url, http_proxy=http_proxy, https_proxy=https_proxy)
 
-        resp = func(*args, **kwargs)
+        code, proxy = resp.status_code, resp.proxy
+        labels = Label(url, proxy, code)
+        c.labels(*labels).inc()
 
-        code, cost = resp.status_code, resp.time_cost
-        labels = Label(url, http_proxy or https_proxy or "", code)
-        h.labels(*labels).observe(cost)
+        return resp
 
-        logging.info(f"{code},{cost*1000:.0f}ms,{url},{http_proxy or https_proxy}")
+    return wrapper
 
-        return code
+
+def health_cost(func):
+    def wrapper(url: str, http_proxy: str = "", https_proxy: str = ""):
+        start = time.time()
+        resp = func(url, http_proxy=http_proxy, https_proxy=https_proxy)
+        cost = time.time() - start
+
+        code, proxy = resp.status_code, resp.proxy
+        labels = Label(url, proxy, code)
+        s.labels(*labels).observe(cost)
+
+        return resp
 
     return wrapper
